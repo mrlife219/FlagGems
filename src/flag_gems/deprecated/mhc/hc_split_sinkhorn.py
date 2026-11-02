@@ -341,7 +341,7 @@ def hc_split_sinkhorn(
     assert hc_scale.shape == (3,)
     assert hc_base.shape == (mix_hc,)
 
-    if mixes.device.type == "cuda" and eps == 1e-6 and hc_mult >= 1:
+    if mixes.device.type in ("cuda", "npu") and eps == 1e-6 and hc_mult >= 1:
         outer_shape = mixes.shape[:-1]
         mixes_flat = mixes.reshape(-1, mix_hc).contiguous()
         num_tokens = mixes_flat.shape[0]
@@ -354,18 +354,18 @@ def hc_split_sinkhorn(
             num_tokens, hc_mult * hc_mult, dtype=torch.float32, device=mixes.device
         )
 
+        # 2026-11-02: BLOCK_N>32 tiers fail at compile time on 910B with
+        # "ub overflow, requires 221184B while 196608B available"
+        # (bishengir auto-multi-buffer inflates local buffers). The 128/256
+        # tiers were never exercised before dataset-eval prefill hit them.
+        # Cap at 32 (tier validated in production on 10-30/10-31) and let the
+        # grid spread large token counts; kernel body untouched.
         if num_tokens <= 256:
             block_n = 16
             num_warps = 1
-        elif num_tokens <= 2048:
+        else:
             block_n = 32
             num_warps = 1
-        elif num_tokens <= 16384:
-            block_n = 128
-            num_warps = 4
-        else:
-            block_n = 256
-            num_warps = 8
         grid = (num_tokens + block_n - 1) // block_n
 
         if hc_mult == 4:
