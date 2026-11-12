@@ -73,6 +73,21 @@ if os.environ.get("FLAGGEMS_ASCEND_TLE_MHC_POST", "0") == "1":
 
 _TLE_MHC_POST_BLOCK_H = 2048
 
+# Config-lottery guard (2026-11-12): upstream @triton.autotune keys on ["H"]
+# only and N never enters the kernel signature — a cold-start process
+# benchmarks the 12 configs ONCE on its first (usually small) shape and locks
+# that config for every N at this H. Three independent production windows
+# matched forced-pin reproductions to <=0.6%: 256/4/1 (0853 run: 8044.5/
+# 6035.2/2009.2 us on 16384/12288/4096 = 2.47x-slow), 512/4/2 (11-05 run:
+# 4691 us), 128-family (11-12 ascending sweep: 14.5 ms, 4.4x artifact).
+# 1024/4/1 is the measured optimum for every prefill shape (graph k 3258/
+# 2447/826 us, matches the per-N fresh-process autotuned pick exactly) and
+# still beats the tuner's own pick at N=8 (41.9 vs 57.4 us).
+_MHC_POST_PIN_MIN_N = 4096
+_MHC_POST_PIN_CONFIG = triton.Config(
+    {"BLOCK_H": 1024}, num_warps=4, num_stages=1
+)
+
 
 @triton.autotune(
     configs=[
@@ -367,6 +382,19 @@ def mhc_post(
                 BLOCK_H=_TLE_MHC_POST_BLOCK_H,
             )
             return out
+
+        if (
+            N >= _MHC_POST_PIN_MIN_N
+            and x.dtype == torch.bfloat16
+            and residual.dtype == torch.bfloat16
+        ):
+            # Collapse the tuner to the single measured-optimal config. A
+            # single-config autotuner skips BOTH benchmarking and the stale
+            # shape-keyed cache (triton Autotuner.run gates on
+            # len(self.configs) > 1), so the pinned config is used regardless
+            # of what a previous small-shape call already locked in.
+            if len(mhc_post_kernel_hc_mult_4.configs) != 1:
+                mhc_post_kernel_hc_mult_4.configs = [_MHC_POST_PIN_CONFIG]
 
         def grid_specialized(META):
             return (N, triton.cdiv(H, META["BLOCK_H"]))
