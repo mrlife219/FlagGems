@@ -25,8 +25,9 @@ Key optimizations (v3):
 - Contiguous layout: stride math removed, enabling LDG.128.
 - All 4 accumulators computed then stored (better ILP).
 - BLOCK_H chosen to evenly divide H when possible (256 divides all targets).
-- TLE-DSA fast path (opt-in, FLAGGEMS_ASCEND_TLE_MHC_POST=1, 910B 2.89x,
-  bandwidth-saturated): see the TLE block below the imports.
+- TLE-DSA fast path (DEFAULT ON since 2026-11-18; kill switch
+  FLAGGEMS_ASCEND_TLE_MHC_POST=0 restores the autotune kernel): see the
+  TLE block below the imports.
 """
 
 import logging
@@ -39,13 +40,25 @@ import triton.language as tl
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# TLE-DSA fast path (opt-in via env, default OFF = byte-identical baseline).
+# TLE-DSA fast path (DEFAULT ON since 2026-11-18; emergency rollback =
+# export FLAGGEMS_ASCEND_TLE_MHC_POST=0, no file swap needed).
 #
 # Evidence (910B standalone, 2026-11-07, N=16384 H=3584 bf16, rep=100 +
 # loop=200 cross-checked, perf/bench/mhc_post_tle_candidate.py):
 #   prod autotune 3.250 ms / 325.2 GB/s -> TLE bh=2048 1.123 ms / 941.3 GB/s
 #   (2.89x, bandwidth-saturated at the RmsNorm ~940 GB/s ceiling);
 #   err vs torch ref identical to prod (0.0625, bf16 rounding level).
+#
+# Production promotion (2026-11-18, AGENTS.md):
+#   standalone curve 2.91x/2.84x/2.85x @16384/12288/4096 (910.6 GB/s at
+#   12288); serve device A/B (run 20261118_0629) prefill p50 3249.1->1078.3us
+#   (3.01x) and 1639.5->546.1us (3.0x), decode N=8 12.4->6.1us (2.03x, so NO
+#   N>=4096 shape guard is needed), capture gate passed (tle_0 stable in the
+#   decode graph); wall A/B (prod port, b8x10.7kx512, 64 req, back-to-back)
+#   TTFT p50 -4.35%, TPOT -1.59% (predicted -1.34%), throughput +1.75%.
+#   Bench discipline after this flip: the LEGACY kernel now requires
+#   FLAGGEMS_ASCEND_TLE_MHC_POST=0 explicitly (baseline arms, prod-vs-TLE
+#   comparisons).
 #
 # Kernel design: bulk GMEM->UB MTE2 copies for all 5 input streams
 # (tle.dsa.copy), fp32 tensor math in UB (tle.dsa.to_tensor), 4 masked
@@ -62,7 +75,7 @@ logger = logging.getLogger(__name__)
 #     backports TLE while upstream gates it behind 3.6).
 # ---------------------------------------------------------------------------
 _tle = None
-if os.environ.get("FLAGGEMS_ASCEND_TLE_MHC_POST", "0") == "1":
+if os.environ.get("FLAGGEMS_ASCEND_TLE_MHC_POST", "1") == "1":  # default ON (2026-11-18)
     try:
         import triton.experimental.tle.language as _tle
     except BaseException:  # noqa: BLE001  (module missing in this triton build)
