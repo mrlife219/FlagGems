@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
+
 import torch
 import triton
 import triton.language as tl
+
+logger = logging.getLogger(__name__)
 
 
 @triton.jit
@@ -415,6 +419,12 @@ def hc_split_sinkhorn(
     sinkhorn_iters: int = 20,
     eps: float = 1e-6,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    logger.debug(
+        "GEMS HC_SPLIT_SINKHORN FORWARD, mixes=%s, hc_mult=%s, sinkhorn_iters=%s",
+        tuple(mixes.shape),
+        hc_mult,
+        sinkhorn_iters,
+    )
     mix_hc = (2 + hc_mult) * hc_mult
     assert mixes.shape[-1] == mix_hc
     assert hc_scale.shape == (3,)

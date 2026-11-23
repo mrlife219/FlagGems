@@ -45,9 +45,14 @@ class MHCPostBenchmark(base.Benchmark):
     DEFAULT_SHAPE_DESC = "N, H"
 
     def set_shapes(self, shape_file_path=None):
+        # Serving-real shapes first (Xing4 / DeepSeek-V4 style, H=3584):
+        # decode single step, short prefill, long-context prefill.
+        # The last entry is a cross-model regression shape kept from the
+        # original list.
         self.shapes = [
-            (4096, 1280),
-            (4096, 2560),
+            (8, 3584),
+            (4096, 3584),
+            (16384, 3584),
             (4096, 7168),
         ]
 

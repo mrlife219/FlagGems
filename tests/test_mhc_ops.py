@@ -98,6 +98,25 @@ def test_mhc_post_vs_ref(n, h, hc_mult):
     torch.testing.assert_close(out_triton.cpu(), out_ref, rtol=1e-2, atol=1e-2)
 
 
+@pytest.mark.mhc_post
+def test_mhc_post_dispatch_log(caplog):
+    """Dispatch log check: the fused path must announce itself (no silent
+    fallback to a compute-free host path)."""
+    data = generate_mhc_post_data(512, 1280)
+    with caplog.at_level("DEBUG", logger="flag_gems.deprecated.mhc.mhc_post"):
+        mhc_post(**data)
+    assert "GEMS MHC_POST FORWARD" in caplog.text
+
+
+@pytest.mark.hc_split_sinkhorn_forward
+def test_mhc_split_sinkhorn_dispatch_log(caplog):
+    """Dispatch log check for the fused sinkhorn entry point."""
+    data = generate_mhc_split_sinkhorn_data(8, 16, 4)
+    with caplog.at_level("DEBUG", logger="flag_gems.deprecated.mhc.hc_split_sinkhorn"):
+        hc_split_sinkhorn(**data)
+    assert "GEMS HC_SPLIT_SINKHORN FORWARD" in caplog.text
+
+
 def generate_mhc_split_sinkhorn_data(
     batch: int,
     seqlen: int,
