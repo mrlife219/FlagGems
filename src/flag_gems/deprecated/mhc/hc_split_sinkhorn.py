@@ -430,7 +430,18 @@ def hc_split_sinkhorn(
     assert hc_scale.shape == (3,)
     assert hc_base.shape == (mix_hc,)
 
-    if mixes.device.type in ("cuda", "npu") and eps == 1e-6 and hc_mult >= 1:
+    # The generic (hc_mult != 4) kernel keeps comb in global memory and
+    # reloads it at every sinkhorn step. On Ascend that store->load
+    # round-trip is not reliable: a few tokens get corrupted with errors
+    # far beyond the 1e-4 test tolerance (observed up to 0.4 on 910B,
+    # varying between runs on identical seeded input, while pre/post
+    # stay at ~1e-7). CUDA honors per-thread same-address ordering, so
+    # the upstream generic kernel stays enabled there unchanged. The
+    # hc_mult==4 tile kernel keeps comb in registers and is unaffected.
+    fast_path = mixes.device.type == "cuda" or (
+        mixes.device.type == "npu" and hc_mult == 4
+    )
+    if fast_path and eps == 1e-6 and hc_mult >= 1:
         outer_shape = mixes.shape[:-1]
         mixes_flat = mixes.reshape(-1, mix_hc).contiguous()
         num_tokens = mixes_flat.shape[0]
@@ -449,12 +460,27 @@ def hc_split_sinkhorn(
         # tiers were never exercised before dataset-eval prefill hit them.
         # Cap at 32 (tier validated in production on 10-30/10-31) and let the
         # grid spread large token counts; kernel body untouched.
-        if num_tokens <= 256:
-            block_n = 16
-            num_warps = 1
+        # Device-gated: CUDA keeps the upstream 16/32/128/256 tiers.
+        if mixes.device.type == "npu":
+            if num_tokens <= 256:
+                block_n = 16
+                num_warps = 1
+            else:
+                block_n = 32
+                num_warps = 1
         else:
-            block_n = 32
-            num_warps = 1
+            if num_tokens <= 256:
+                block_n = 16
+                num_warps = 1
+            elif num_tokens <= 2048:
+                block_n = 32
+                num_warps = 1
+            elif num_tokens <= 16384:
+                block_n = 128
+                num_warps = 4
+            else:
+                block_n = 256
+                num_warps = 8
         grid = (num_tokens + block_n - 1) // block_n
 
         if hc_mult == 4:
