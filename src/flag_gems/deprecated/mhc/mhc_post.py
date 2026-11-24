@@ -75,7 +75,9 @@ logger = logging.getLogger(__name__)
 #     backports TLE while upstream gates it behind 3.6).
 # ---------------------------------------------------------------------------
 _tle = None
-if os.environ.get("FLAGGEMS_ASCEND_TLE_MHC_POST", "1") == "1":  # default ON (2026-11-18)
+if (
+    os.environ.get("FLAGGEMS_ASCEND_TLE_MHC_POST", "1") == "1"
+):  # default ON (2026-11-18)
     try:
         import triton.experimental.tle.language as _tle
     except BaseException:  # noqa: BLE001  (module missing in this triton build)
@@ -97,9 +99,7 @@ _TLE_MHC_POST_BLOCK_H = 2048
 # 2447/826 us, matches the per-N fresh-process autotuned pick exactly) and
 # still beats the tuner's own pick at N=8 (41.9 vs 57.4 us).
 _MHC_POST_PIN_MIN_N = 4096
-_MHC_POST_PIN_CONFIG = triton.Config(
-    {"BLOCK_H": 1024}, num_warps=4, num_stages=1
-)
+_MHC_POST_PIN_CONFIG = triton.Config({"BLOCK_H": 1024}, num_warps=4, num_stages=1)
 
 
 @triton.autotune(

@@ -62,7 +62,9 @@ def mhc_split_sinkhorn_kernel_hcmult_4_tile(
     b3 = tl.load(hc_base_ptr + 8 + c4[:, None] * 4 + c4[None, :])  # [4,4]
 
     m_pre = tl.load(mixes_ptr + row * 24 + c4[None, :], mask=mask[:, None], other=0.0)
-    m_post = tl.load(mixes_ptr + row * 24 + 4 + c4[None, :], mask=mask[:, None], other=0.0)
+    m_post = tl.load(
+        mixes_ptr + row * 24 + 4 + c4[None, :], mask=mask[:, None], other=0.0
+    )
     pre = tl.sigmoid(m_pre * s0 + b_pre[None, :]) + 1e-6
     post = 2.0 * tl.sigmoid(m_post * s1 + b_post[None, :])
     tl.store(pre_ptr + row * 4 + c4[None, :], pre, mask=mask[:, None])
@@ -78,7 +80,7 @@ def mhc_split_sinkhorn_kernel_hcmult_4_tile(
     m3 = tl.load(ptrs, mask=mask[:, None, None], other=0.0)  # [BN,4,4]
 
     t = m3 * s2 + b3[None, :, :]
-    rmax = tl.max(t, axis=2)                    # [BN,4]
+    rmax = tl.max(t, axis=2)  # [BN,4]
     t = tl.exp(t - rmax[:, :, None])
     inv_r = 1.0 / tl.sum(t, axis=2)
     t = t * inv_r[:, :, None] + 1e-6
@@ -92,10 +94,7 @@ def mhc_split_sinkhorn_kernel_hcmult_4_tile(
         t = t * inv_c[:, None, :]
 
     sptrs = (
-        comb_ptr
-        + offs[:, None, None] * 16
-        + c4[None, :, None] * 4
-        + c4[None, None, :]
+        comb_ptr + offs[:, None, None] * 16 + c4[None, :, None] * 4 + c4[None, None, :]
     )
     tl.store(sptrs, t, mask=mask[:, None, None])
 
